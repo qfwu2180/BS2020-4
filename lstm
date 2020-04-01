@@ -1,0 +1,133 @@
+import tushare as ts
+import pandas as pd
+import numpy as np
+from keras.models import Sequential
+from sklearn.preprocessing import MinMaxScaler
+from keras.layers import Dense, Dropout, Activation, Flatten
+from keras.layers import LSTM
+import matplotlib.pyplot as plt
+import os
+
+tushare_token = '8cde7eff54a79bc4259d46a909a0605343e4bc454faddf0e75e6b74c'
+
+
+# 查询当前所有正常上市交易的股票列表
+def stock_catch():
+    pro = ts.pro_api(tushare_token)
+    data = pro.stock_basic(exchange='', list_status='L')
+    data.to_csv('stocks_info.csv')
+
+#获取在07年之前上市的股票的历史数据
+def stock_info():
+    pro = ts.pro_api(tushare_token)
+    info = pd.read_csv('stocks_info.csv')
+    data = info[info.list_date < 20170101]
+    stock_num = data.ts_code
+    flag = 1  #只获取一只股票
+    for i in stock_num:
+        if flag==1:
+            wd = pro.daily(ts_code=i)
+            wd.drop(['ts_code', 'pre_close', 'change', 'pct_chg', 'vol', 'amount'], axis=1, inplace=True)
+            wd = wd.sort_values(by='trade_date')
+            wd.to_csv('stock_data\\' + i + '.csv', index=False)
+            flag = 0
+
+'''
+            wd = pro.daily(ts_code=i)
+            wd1 = pro.daily_basic(ts_code=i)
+            wd.drop(['ts_code','pre_close','change','pct_chg'], axis=1, inplace=True)
+            wd1.drop(['ts_code', 'close'], axis=1, inplace=True)
+            df = pd.merge(wd, wd1,how='right',on='trade_date')
+            df = df.sort_values(by='trade_date')
+            flag = 0
+            df.to_csv('stock_data\\'+ i +'.csv',index=False)
+'''
+
+##获取全部股票的历史数据
+'''
+    for i in stock_num:
+            wd = pro.daily(ts_code=i)
+            wd.to_csv('stock_data\\'+ i +'.csv')
+'''
+def Scale_Data(values):
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled = scaler.fit_transform(values)
+    return scaled
+
+def load_data(file_path):
+    df =  pd.read_csv(file_path)
+    data = df.drop(['trade_date'], axis=1)
+
+    time_stamp = 50 #50个交易日来预测
+    #划分训练集以及测试集
+    divide = 2*data.shape[0]/3
+    train = data[data.index <= divide]
+    test = data[data.index > divide]
+
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    s_train = scaler.fit_transform(train)
+    s_test = scaler.fit_transform(test)
+
+    x_train, y_train = [], []
+    for i in range(time_stamp,len(train)):
+        x_train.append(s_train[i-time_stamp:i-1])
+        y_train.append(s_train[i, 3])
+    x_train, y_train = np.array(x_train), np.array(y_train)
+
+    x_test, y_test = [], []
+    for i in range(time_stamp, len(s_test)):
+        x_test.append(s_test[i-time_stamp: i-1])
+        y_test.append(s_test[i, 3])
+    x_test, y_test = np.array(x_test), np.array(y_test)
+
+    epochs = 3
+    batch_size = 16
+    #创建模型
+    model = Sequential()
+    #input_dim 单个样本的特征值维度
+    #input_length 输入的时间点长度
+    model.add(LSTM(units=100, return_sequences=True, input_dim=x_train.shape[-1], input_length=x_train.shape[1]))
+    model.add(LSTM(units=50))
+    model.add(Dense(1))
+    model.compile(loss='mean_squared_error', optimizer='adam')          #编译模型
+    model.fit(x_train, y_train, epochs=epochs, batch_size=batch_size, verbose=1) #训练网络
+
+
+    predict_price = model.predict(x_test)
+    scaler.fit_transform(pd.DataFrame(test['close'].values))
+    predict_price = scaler.inverse_transform(predict_price)
+    y_test = scaler.inverse_transform([y_test])
+
+    print(y_test[0])
+    dict_data = {
+         'pre' : predict_price.reshape(1, -1)[0],#转为一行数据
+         'close' : y_test[0]
+    }
+    data_pd = pd.DataFrame(dict_data)
+    data_pd.plot()
+    plt.plot(data_pd[['pre', 'close']])
+    plt.show()
+
+    #plt.plot(predict_price)
+    #plt.plot(test['close'],color='red')
+    #plt.plot(train.index,train['close'])
+    #plt.show()
+
+#stock_catch()
+#stock_info()
+load_data('stock_data\\000001.SZ.csv')
+
+
+
+
+
+'''
+pro = ts.pro_api(tushare_token)
+df = pro.daily_basic(ts_code='000001.SZ')
+print(df)
+'''
+'''
+    for root, dirs, files in os.walk('stock_data'):
+        print(dirs)  # 当前路径下所有子目录
+        print(files)
+'''
